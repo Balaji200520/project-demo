@@ -1,0 +1,173 @@
+--A. Pizza Metrics
+
+--1. How many pizzas were ordered?
+--2. How many unique customer orders were made?
+--3. How many successful orders were delivered by each runner?
+--4. How many of each type of pizza was delivered?
+--5. How many Vegetarian and Meatlovers were ordered by each customer?
+--6. What was the maximum number of pizzas delivered in a single order?
+--7. For each customer, how many delivered pizzas had at least 1 change and how many had no changes?
+--8. How many pizzas were delivered that had both exclusions and extras?
+--9. What was the total volume of pizzas ordered for each hour of the day?
+--10. What was the volume of orders for each day of the week?
+
+
+drop table if exists cleaned_customer_orders_temp_table;
+create temp table cleaned_customer_orders_temp_table as
+(
+  select order_id,customer_id,pizza_id,
+  case
+  	when exclusions = 'null' or exclusions = '' or exclusions = 'NaN' then NULL 
+  else exclusions
+  end as exclusions,
+  
+  case
+  	when extras = 'null' or extras = ''  or extras = 'NaN' then NULL 
+  else extras
+  end as extras,
+  
+  order_time
+  
+  from customer_orders
+ );
+ 
+ select * from cleaned_customer_orders_temp_table;
+ 
+
+ drop table if exists cleaned_runner_orders_temp_table;
+ create temp table cleaned_runner_orders_temp_table as
+ (
+   select order_id,runner_id,
+   case
+   		when pickup_time like 'null' then NULL
+   		else pickup_time
+   end:: timestamp as Pickup_time,
+   
+   NULLIF(REGEXP_REPLACE(distance, '[^0-9.]', '', 'g'), '')::NUMERIC AS distance,
+	NULLIF(REGEXP_REPLACE(duration, '[^0-9.]', '', 'g'), '')::NUMERIC AS duration,
+   
+   case
+   		when cancellation = 'null' or cancellation = 'NaN' or cancellation = '' then NULL
+   else cancellation
+   end as cancellation
+   
+   from runner_orders
+);
+
+
+select * from cleaned_runner_orders_temp_table;
+
+
+--1. How many pizzas were ordered?
+
+select count(pizza_id) as pizza_order_count
+from cleaned_customer_orders_temp_table;
+
+
+--2. How many unique customer orders were made?
+
+select count(distinct order_id) as unique_customer_order
+from cleaned_customer_orders_temp_table;
+
+
+--3. How many successful orders were delivered by each runner?
+
+select runner_id,count(order_id)
+from cleaned_runner_orders_temp_table
+where cancellation  is NULL
+group by runner_id;
+
+
+--4. How many of each type of pizza was delivered?
+
+select me.pizza_name,count(cr.order_id)
+from cleaned_customer_orders_temp_table as cc
+inner join cleaned_runner_orders_temp_table as cr
+on cc.order_id = cr.order_id
+inner join pizza_names as me
+on me.pizza_id  = cc.pizza_id
+where cancellation is NULL
+group by me.pizza_name
+order by 2 desc;
+
+
+--5. How many Vegetarian and Meatlovers were ordered by each customer?
+
+
+select customer_id,
+	sum(case
+        	when pizza_id = 1 then 1 
+        	else 0
+		end) as Meatlovers,
+	sum(case 
+        	when pizza_id = 2 then 1 
+        	else 0
+		end) as Vegetarian
+from cleaned_customer_orders_temp_table
+group by customer_id;
+
+
+--6. What was the maximum number of pizzas delivered in a single order?
+
+with max_delivery_per_day as
+(select cc.order_id,count(cc.pizza_id) as number_of_delivered_orders
+ from cleaned_customer_orders_temp_table as cc
+ inner join cleaned_runner_orders_temp_table as cr
+ on cc.order_id = cr.order_id
+ where cancellation is NULL
+ group by cc.order_id)
+ select max(number_of_delivered_orders) as total_delivery_per_day
+ from max_delivery_per_day;
+ 
+ 
+ --7. For each customer, how many delivered pizzas had at least 1 change and how many had no changes?
+ 
+ select cc.customer_id,
+ sum(case
+     	when cc.exclusions is not NULL or cc.extras is not NULL then 1 
+     	else 0
+     end) as pizza_with_atleast_one_changes,
+  sum(case
+      	when cc.exclusions is NULL and cc.extras is NULL then 1
+      	else 0
+      end) as Pizza_with_no_change
+ from cleaned_customer_orders_temp_table as cc
+ inner join cleaned_runner_orders_temp_table as cr
+ on cc.order_id = cr.order_id
+ where cancellation is NULL
+ group by customer_id;
+ 
+ --8. How many pizzas were delivered that had both exclusions and extras?
+ 
+ select
+ sum(case
+     	when cc.exclusions is not NULL and cc.extras is not NULL then 1 
+     	else 0
+     end) as total_pizza_with_both_changes_delivered
+  
+ from cleaned_customer_orders_temp_table as cc
+ inner join cleaned_runner_orders_temp_table as cr
+ on cc.order_id = cr.order_id
+ where cancellation is NULL;
+ 
+ 
+ --9. What was the total volume of pizzas ordered for each hour of the day?
+ 
+ select 
+ 	extract('hour' from order_time::timestamp)::text as hours_of_24h,
+ 	TO_CHAR(order_time::timestamp,'HH:AM') as hours_of_12h, 
+    count(*) as number_of_pizza
+ from cleaned_customer_orders_temp_table
+ where order_time is not NULL
+ group by  hours_of_24h,  hours_of_12h
+ order by 2 desc;
+ 
+ 
+ --10. What was the volume of orders for each day of the week?
+ 
+ select
+ 	TO_CHAR(order_time , 'day')as days_of_week,
+    count(*) as number_of_pizza
+ from cleaned_customer_orders_temp_table
+ group by days_of_week,extract('dow' from order_time)
+ order by extract('dow' from order_time);
