@@ -171,3 +171,102 @@ with max_delivery_per_day as
  from cleaned_customer_orders_temp_table
  group by days_of_week,extract('dow' from order_time)
  order by extract('dow' from order_time);
+ 
+ 
+ 
+ ---B. Runner and Customer Experience
+ 
+ 
+--1. How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+--2. What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+--3. Is there any relationship between the number of pizzas and how long the order takes to prepare?
+--4. What was the average distance travelled for each customer?
+--5. What was the difference between the longest and shortest delivery times for all orders?
+--6. What was the average speed for each runner for each delivery and do you notice any trend for these values?
+--7. What is the successful delivery percentage for each runner?
+
+
+--1. How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+
+
+with runner_signup as 
+(select runner_id,registration_date,registration_date-((registration_date-'2021-01-01')%7) as starting_week
+from runners)
+select starting_week,count(runner_id)
+from runner_signup
+group by starting_week
+order by 2 desc;
+
+
+
+--2. What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+
+
+with runner_time as
+(select distinct cr.runner_id,cc.order_id, (cr.pickup_time-cc.order_time) as actual_pickup_time
+ from cleaned_customer_orders_temp_table as cc
+ inner join cleaned_runner_orders_temp_table as cr
+ on cc.order_id = cr.order_id
+ where cr.pickup_time is not NULL)
+select extract('minutes' from avg(actual_pickup_time)) as average_pickup_time
+from runner_time;
+
+
+--3. Is there any relationship between the number of pizzas and how long the order takes to prepare?
+
+with order_preparation as
+(select cc.order_id,count(cc.pizza_id) as number_of_pizza,(cr.pickup_time-cc.order_time) as order_preparation_time
+from cleaned_customer_orders_temp_table as cc
+inner join cleaned_runner_orders_temp_table as cr
+on cc.order_id = cr.order_id
+where cr.pickup_time is not NULL and cc.order_time is not NULL
+group by cc.order_id,(cr.pickup_time-cc.order_time))
+select order_id,number_of_pizza,TO_CHAR(order_preparation_time,'HH:MI:SS') as total_time_taken_for_prep
+from order_preparation
+group by order_id,number_of_pizza,order_preparation_time
+order by 2,1 asc;
+
+
+--4. What was the average distance travelled for each customer?
+
+
+select cc.customer_id,ROUND(avg(cr.distance),2) as distance_in_KM
+from cleaned_customer_orders_temp_table as cc
+inner join cleaned_runner_orders_temp_table as cr
+on cc.order_id = cr.order_id
+where cr.cancellation is null
+group by 1;
+
+
+--5. What was the difference between the longest and shortest delivery times for all orders?
+
+select max(duration),min(duration ),(max(duration) - min(duration)) as difference_between_longest_And_shortest_delivery_time
+from cleaned_runner_orders_temp_table;
+
+
+
+--6. What was the average speed for each runner for each delivery and do you notice any trend for these values?
+
+
+select cc.customer_id,cc.order_id,count(cc.pizza_id) as n_pizza,cr.runner_id,cr.distance,cr.duration,round((cr.distance/(cr.duration/60)),2) as speed_in_KMPH,round((cr.distance/(cr.duration/60))*0.621,2) as speed_in_MPH
+from cleaned_customer_orders_temp_table as cc
+inner join cleaned_runner_orders_temp_table as cr
+on cc.order_id = cr.order_id
+where cr.distance is not NULL and cr.duration is not NULL
+group by cc.customer_id,cc.order_id,cr.runner_id,cr.distance,cr.duration
+order by cc.order_id,cc.customer_id;
+
+
+--7. What is the successful delivery percentage for each runner?
+
+with delivery_rate as
+(select runner_id,count(order_id) as total_order_assigned,
+sum(case
+		when cancellation is NULL then 1 else 0
+	end) as total_delivered_sucessfully
+from cleaned_runner_orders_temp_table
+group by runner_id)
+select runner_id,total_order_assigned,total_delivered_sucessfully,round(((total_delivered_sucessfully::numeric/total_order_assigned)*100),2) as delivery_percentage
+from delivery_rate
+group by runner_id,total_order_assigned,total_delivered_sucessfully
+order by 1;
